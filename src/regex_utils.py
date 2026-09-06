@@ -38,3 +38,61 @@ def insert_concatenation(expression: str) -> str:
             result.append(".")
 
     return "".join(result)
+
+
+def infix_to_postfix(expression: str) -> str:
+    """Convierte una expresión infija a postfix con Shunting Yard.
+
+    La concatenación se vuelve explícita automáticamente antes de aplicar el
+    algoritmo. Se rechazan expresiones con operadores o paréntesis mal usados.
+    """
+    expression = insert_concatenation(expression)
+    output: list[str] = []
+    operators: list[str] = []
+    expecting_operand = True
+
+    for token in expression:
+        if is_symbol(token):
+            if not expecting_operand:
+                raise ValueError("Falta un operador entre símbolos.")
+            output.append(token)
+            expecting_operand = False
+        elif token == "(":
+            if not expecting_operand:
+                raise ValueError("Falta concatenación antes de '('.")
+            operators.append(token)
+        elif token == ")":
+            if expecting_operand:
+                raise ValueError("Paréntesis de cierre sin una expresión previa.")
+            while operators and operators[-1] != "(":
+                output.append(operators.pop())
+            if not operators:
+                raise ValueError("Paréntesis desbalanceados.")
+            operators.pop()
+            expecting_operand = False
+        elif token == "*":
+            if expecting_operand:
+                raise ValueError("'*' debe seguir a un símbolo o a ')'.")
+            output.append(token)
+        else:  # | o .
+            if expecting_operand:
+                raise ValueError(f"El operador {token!r} no tiene operando izquierdo.")
+            while (
+                operators
+                and operators[-1] != "("
+                and PRECEDENCE[operators[-1]] >= PRECEDENCE[token]
+            ):
+                output.append(operators.pop())
+            operators.append(token)
+            expecting_operand = True
+
+    if expecting_operand:
+        raise ValueError("La expresión termina con un operador.")
+
+    while operators:
+        token = operators.pop()
+        if token == "(":
+            raise ValueError("Paréntesis desbalanceados.")
+        output.append(token)
+
+    return "".join(output)
