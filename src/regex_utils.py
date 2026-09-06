@@ -19,3 +19,22 @@ def validate_characters(expression: str) -> None:
             raise ValueError("La expresión regular no debe contener espacios.")
         if not (is_symbol(token) or token in OPERATORS):
             raise ValueError(f"Símbolo no permitido: {token!r}")
+
+
+def insert_concatenation(expression: str) -> str:
+    """Inserta el operador interno ``.`` donde la concatenación es implícita."""
+    validate_characters(expression)
+    result: list[str] = []
+
+    for index, token in enumerate(expression):
+        result.append(token)
+        if index == len(expression) - 1:
+            continue
+
+        next_token = expression[index + 1]
+        left_can_end = is_symbol(token) or token in {")", "*"}
+        right_can_start = is_symbol(next_token) or next_token == "("
+        if left_can_end and right_can_start:
+            result.append(".")
+
+    return "".join(result)
