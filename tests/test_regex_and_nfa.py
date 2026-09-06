@@ -12,7 +12,7 @@ class RegexAndNFATests(unittest.TestCase):
         self.assertEqual(insert_concatenation("(a|b)*abb"), "(a|b)*.a.b.b")
 
     def test_shunting_yard_respects_precedence(self) -> None:
-        self.assertEqual(infix_to_postfix("a|bc*"), "abc*.")
+        self.assertEqual(infix_to_postfix("a|bc*"), "abc*.|")
 
     def test_invalid_expression_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
