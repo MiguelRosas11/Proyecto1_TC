@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .nfa_simulator import SimulationStep, simulate
+from .models import NFA
 from .regex_utils import infix_to_postfix, insert_concatenation
 from .thompson import build_nfa
 
@@ -26,6 +27,7 @@ class NFAAnalysis:
     explicit_expression: str
     postfix: str
     word: str
+    nfa: NFA
     state_count: int
     alphabet: tuple[str, ...]
     accepts_word: bool
@@ -44,6 +46,7 @@ def analyze_nfa(expression: str, word: str) -> NFAAnalysis:
         explicit_expression=explicit_expression,
         postfix=postfix,
         word=word,
+        nfa=nfa,
         state_count=len(nfa.states),
         alphabet=tuple(sorted(nfa.alphabet)),
         accepts_word=bool(trace[-1].states & nfa.accept_states),
