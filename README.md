@@ -5,6 +5,10 @@ cadena `w`, construye un AFN de Thompson, lo convierte a AFD por subconjuntos,
 minimiza el AFD por refinamiento de particiones y simula los tres autómatas.
 La interfaz indica **Sí / No** y permite abrir sus grafos.
 
+## Video de demostración
+
+[Ver la presentación completa en YouTube](https://www.youtube.com/watch?v=sNCcde5zr3A)
+
 ## Instalación
 
 Requiere **Python 3.10 o posterior**, Tkinter y Graphviz (ejecutable `dot`).
