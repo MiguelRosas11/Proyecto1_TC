@@ -1,116 +1,124 @@
-# Analizador léxico de expresiones regulares
+# Analizador de expresiones regulares y autómatas
 
-Proyecto 1 de Teoría de la Computación. A partir de una expresión regular y
-una cadena, el programa construye autómatas y determina si la cadena pertenece
-al lenguaje descrito.
+Proyecto 1 de Teoría de la Computación. Recibe una expresión regular `r` y una
+cadena `w`, construye un AFN de Thompson, lo convierte a AFD por subconjuntos,
+minimiza el AFD por refinamiento de particiones y simula los tres autómatas.
+La interfaz indica **Sí / No** y permite abrir sus grafos.
 
-## Alcance
+## Instalación
 
-El proyecto usa solamente los algoritmos solicitados en el enunciado:
+Requiere **Python 3.10 o posterior**, Tkinter y Graphviz (ejecutable `dot`).
+Los algoritmos están implementados en Python; Graphviz solo dibuja los grafos.
+`re` se usa únicamente como referencia independiente en las pruebas.
 
-1. Conversión de infix a postfix con Shunting Yard.
-2. Construcción de AFN mediante Thompson.
-3. Simulación del AFN con epsilon-cerradura.
-4. Construcción de AFD por subconjuntos.
-5. Minimización del AFD.
-6. Simulación y visualización de los tres autómatas.
+1. Instalar Python con Tkinter. `python3 -m tkinter` debe abrir una ventana.
+   En Linux puede requerirse el paquete `python3-tk`; en Windows, usar el
+   instalador de Python con Tcl/Tk. En macOS, usar una distribución con Tkinter.
+2. Instalar Graphviz y agregar su carpeta `bin` al `PATH`:
+   - macOS con Homebrew: `brew install graphviz`.
+   - Debian/Ubuntu: `sudo apt install graphviz`.
+   - Windows: instalar Graphviz y agregar su carpeta `bin` al `PATH`.
+3. Desde la raíz del proyecto:
 
-Los símbolos del alfabeto son caracteres individuales. `|`, `*`, `(` y `)`
-son operadores; la concatenación se escribe de forma implícita. El programa
-usa `ε` internamente para transiciones vacías.
+```sh
+python3 --version
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+dot -V
+python main.py
+```
 
-## Interfaz
+En Windows, activar con `.venv\Scripts\activate` (cmd) o
+`.venv\Scripts\Activate.ps1` (PowerShell). Si `python3` es 3.9, seleccionar
+explícitamente un intérprete 3.10+ antes de crear el entorno.
 
-La aplicación tendrá **una sola vista principal**, por lo que no es necesario
-crear varias pantallas ni navegación compleja. Esa vista cambia entre tres
-estados: inicial, resultado y error.
+## Uso y sintaxis
 
-- Dos campos: expresión regular y cadena a evaluar.
-- Un botón para cargar un archivo `.txt` de expresiones, una por línea.
-- Un botón principal para ejecutar el análisis.
-- Tarjetas de resultado para postfix, AFN, AFD y AFD mínimo.
-- Un estado de aceptación claro: `Aceptada` o `No aceptada`.
+- `|`: unión; `*`: cerradura de Kleene; `(...)`: agrupación.
+- Concatenación implícita (`ab`) o explícita (`a.b`).
+- Precedencia: `*`, concatenación, `|`.
+- `ε`: palabra vacía dentro de la expresión. Para evaluar la cadena vacía,
+  **dejar vacío el campo de cadena**, no escribir el carácter `ε`.
+- Cada símbolo del alfabeto es un carácter. Se deriva de la expresión y
+  excluye operadores y `ε`. Se rechazan expresiones vacías o con espacios.
+- No se implementa la sintaxis extendida de motores de regex: `+`, `?`,
+  corchetes y barras invertidas son caracteres literales, no atajos ni escapes.
+  Los operadores reservados no se pueden escapar para usarlos como literales.
+- La aceptación requiere consumir **toda** la cadena. Un carácter ajeno al
+  alfabeto se rechaza.
 
-La estética seguirá referencias visuales de iOS: fondo gris muy claro,
-tarjetas blancas, espacio generoso, azul de acento y tipografía limpia. Se
-implementará con Tkinter, incluido con Python, para evitar dependencias de UI.
+Ingresar una expresión y una cadena; pulsar **Analizar**. Los resultados aparecen después de analizar. La vista muestra
+concatenación explícita, postfix, alfabeto, estados del AFN, epsilon-cerraduras
+y veredictos de los dos AFD. Cada fila de la tabla **Autómatas** tiene un botón **Ver grafo** que abre
+una ventana con desplazamiento horizontal y vertical. La flecha de entrada señala
+el estado inicial y el doble círculo señala aceptación. En el AFD, cada estado
+muestra el subconjunto de estados AFN que representa; `{}` es el estado muerto.
+
+## Archivos de expresiones
+
+**Cargar archivo .txt** procesa automáticamente cada línea no vacía con la
+cadena que esté en el campo al iniciar la carga. Se acepta UTF-8 con o sin BOM.
+Las líneas vacías se omiten y se conserva la numeración original. Una expresión
+inválida aparece como error y no detiene las siguientes líneas.
+
+La tabla muestra AFN, AFD y AFD mínimo por línea. Seleccionar una fila restaura
+su expresión, cadena y resultados, con acceso a sus propias gráficas. Cambiar
+el campo de cadena no recalcula el lote existente: cargar otra vez el archivo
+para evaluarlo con una cadena distinta.
+
+## Salidas
+
+Análisis individual: `outputs/afn.png`, `outputs/afd.png`,
+`outputs/afd_minimo.png`, con sus `.dot`. Se reemplazan al analizar de nuevo.
+La carpeta se resuelve respecto del proyecto, independientemente de dónde se
+inicie el programa.
+
+Cada carga de archivo crea `outputs/lote_<identificador>/linea_NNN/`, con tres
+PNG y tres DOT por expresión válida. Los lotes no se sobrescriben entre sí.
+`outputs/` está excluido de Git; se puede limpiar cuando ya no se necesite.
 
 ## Arquitectura
 
-```text
-Proyecto1/
-├── main.py                       # Punto de entrada de la interfaz (Persona A)
-├── README.md                     # Guía, arquitectura y uso (Persona A)
-├── src/
-│   ├── models.py                 # Contratos NFA/DFA compartidos, no editar después
-│   ├── regex_utils.py            # Validación, concatenación, postfix (Persona A)
-│   ├── thompson.py               # Construcción del AFN (Persona A)
-│   ├── nfa_simulator.py          # Epsilon-cerradura y simulación AFN (Persona A)
-│   ├── analysis_service.py       # Resultado del bloque AFN para la UI (Persona A)
-│   ├── ui/                       # Interfaz y estilo (Persona A)
-│   ├── subset_construction.py    # AFN a AFD (Persona B)
-│   ├── dfa_minimizer.py          # Minimización de AFD (Persona B)
-│   ├── dfa_simulator.py          # Simulación AFD (Persona B)
-│   ├── dfa_pipeline.py           # Adaptador de resultados AFD para la UI (Persona B)
-│   └── renderer.py               # Imágenes DOT/PNG de autómatas (Persona B)
-├── tests/
-│   ├── test_regex_and_nfa.py     # Pruebas de Persona A
-│   └── test_dfa_and_graphs.py    # Pruebas de Persona B
-├── inputs/                       # Archivos de expresiones de prueba
-└── outputs/                      # Imágenes generadas; ignorado por Git
-```
+| Módulo | Responsabilidad |
+|---|---|
+| `regex_utils.py` | Validación, concatenación y Shunting Yard |
+| `thompson.py` | Construcción del AFN |
+| `nfa_simulator.py` | Epsilon-cerradura, movimientos y simulación AFN |
+| `subset_construction.py` | AFD completo y mapa de subconjuntos |
+| `dfa_simulator.py` | Simulación del AFD original o mínimo |
+| `dfa_minimizer.py` | Estados alcanzables y refinamiento de particiones |
+| `renderer.py` | PNG/DOT con Graphviz |
+| `dfa_pipeline.py` | Coordinación del bloque AFD y sus gráficas |
+| `analysis_service.py` | Resultados para la interfaz |
+| `batch_service.py` | Procesamiento por línea con errores independientes |
+| `ui/` | Interfaz Tkinter y visor de imágenes |
 
-`models.py` define el contrato común: un autómata tiene estados, alfabeto,
-estado inicial, estados de aceptación y transiciones. Cada módulo recibe una
-estructura y devuelve otra; no imprime ni abre ventanas por cuenta propia.
+El modelo `DFA` impide transiciones epsilon. La determinización incluye el
+subconjunto vacío cuando es alcanzable; la minimización exige un AFD completo,
+elimina estados inalcanzables y numera el estado inicial como `M0`.
 
-## División del trabajo
+## Validación
 
-### Persona A — interfaz y bloque AFN
-
-- `models.py`, `regex_utils.py`, `thompson.py` y `nfa_simulator.py`.
-- `analysis_service.py`, `main.py` y toda la carpeta `src/ui/`.
-- `README.md` y `tests/test_regex_and_nfa.py`.
-- Integración visual de los resultados que entregue `dfa_pipeline.py`.
-
-### Persona B — bloque AFD y gráficas
-
-- `subset_construction.py`, `dfa_minimizer.py` y `dfa_simulator.py`.
-- `dfa_pipeline.py`, que expone los resultados AFD en el formato acordado.
-- `renderer.py` y `tests/test_dfa_and_graphs.py`.
-- Generación de los PNG/DOT para AFN, AFD y AFD mínimo.
-
-El reparto queda equilibrado: Persona A desarrolla la transformación,
-simulación no determinista y toda la experiencia visual; Persona B desarrolla
-la determinización, minimización y las gráficas solicitadas.
-
-### Regla para no interferir
-
-Cada persona trabaja exclusivamente en sus archivos. Antes de que Persona B
-empiece, Persona A congela `models.py`. Persona B no modifica `main.py`,
-`README.md` ni `src/ui/`; Persona A no modifica los módulos de AFD ni
-`renderer.py`. Se trabaja en ramas separadas y se integra mediante pull request
-o merge una vez que pasen las pruebas.
-
-## Contrato para la integración
-
-Persona B implementará una función en `src/dfa_pipeline.py`:
-
-```python
-def analyze_dfas(nfa, word):
-    """Devuelve los resultados del AFD por subconjuntos y del AFD mínimo."""
-```
-
-Cada resultado debe contener al menos `state_count`, `accepts_word` y una ruta
-opcional a la imagen generada. La interfaz funciona desde ahora con el AFN y
-mostrará las tarjetas AFD automáticamente al estar disponible ese módulo.
-
-## Ejecución y pruebas
-
-```text
-python main.py
+```sh
+source .venv/bin/activate
 python -m unittest discover -s tests -v
 ```
 
-En Windows, si `python` apunta a la Microsoft Store, use el intérprete de
-Python instalado en su equipo o active el entorno virtual del proyecto.
+Las pruebas verifican los algoritmos, equivalencia de los tres simuladores en
+1,290 combinaciones de entrada frente a una referencia independiente, equivalencia
+AFD/mínimo mediante exploración del producto, conteos mínimos conocidos y ausencia
+de pares de estados equivalentes en los mínimos de prueba. También verifican
+PNG reales, errores de Graphviz, lotes y acciones de la interfaz.
+
+Las pruebas gráficas requieren `dot`; las de interfaz requieren Tkinter y una
+sesión gráfica. Si Tk no puede crear una ventana, las pruebas de interfaz se
+marcan como omitidas: eso no sustituye la demostración en un equipo con pantalla.
+
+## Alcance y límites
+
+Es un reconocedor de lenguajes regulares del curso: no tokeniza programas ni
+implementa una herramienta de regex de propósito general. La determinización
+puede crecer exponencialmente en estados; expresiones grandes pueden tardar y
+producir grafos extensos. El lote permite actualizar la interfaz entre líneas,
+pero el análisis de una sola expresión se ejecuta en el hilo de la interfaz.

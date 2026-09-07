@@ -51,7 +51,11 @@ def simulate(nfa: NFA, word: str) -> tuple[SimulationStep, ...]:
     current_states = epsilon_closure(nfa, {nfa.start_state})
     steps = [SimulationStep(symbol=None, states=frozenset(current_states))]
     for symbol in word:
-        current_states = epsilon_closure(nfa, move(nfa, current_states, symbol))
+        # ε representa ausencia de entrada; nunca puede consumirse como carácter.
+        current_states = (
+            epsilon_closure(nfa, move(nfa, current_states, symbol))
+            if symbol in nfa.alphabet else set()
+        )
         steps.append(SimulationStep(symbol=symbol, states=frozenset(current_states)))
 
     return tuple(steps)

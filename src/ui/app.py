@@ -2,9 +2,10 @@
 
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from ..analysis_service import NFAAnalysis, analyze_nfa, analyze_optional_dfas
+from ..batch_service import iter_file_analyses
 from . import theme
 from .components import ScrollableFrame, card, clear_children, info_row
 
@@ -21,8 +22,10 @@ class LexerApp:
 
         self.expression_var = tk.StringVar(value="(a|b)*abb(a|b)*")
         self.word_var = tk.StringVar(value="babbaaaaa")
-        self.file_var = tk.StringVar(value="También puedes cargar un archivo .txt")
-        self._loaded_expressions: list[str] = []
+        self.file_var = tk.StringVar()
+        self.batch_context_var = tk.StringVar()
+        self._batch_results = {}
+        self._batch_job = None
 
         self._build_layout()
         self._show_empty_result()
@@ -38,111 +41,114 @@ class LexerApp:
         hero = ttk.Frame(content, style="App.TFrame", padding=(34, 30, 34, 18))
         hero.grid(row=0, column=0, columnspan=2, sticky="ew")
         ttk.Label(hero, text="Analizador Léxico", style="Header.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            hero,
-            text="Expresión regular → AFN → AFD → AFD mínimo",
-            style="Subtitle.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(5, 0))
 
         self._build_input_card(content)
 
-        self.status_card = card(content, "Resultado", "La respuesta aparece después de analizar la cadena")
+        self.status_card = card(content, "Resultado")
         self.status_card.grid(row=2, column=0, columnspan=2, sticky="ew", padx=34, pady=(0, 12))
         self.status_content = self.status_card.winfo_children()[-1]
 
-        self.summary_card = card(content, "Transformación", "Detalles de la expresión que ingresaste")
+        self.summary_card = card(content, "Transformación")
         self.summary_card.grid(row=3, column=0, sticky="nsew", padx=(34, 6), pady=(0, 12))
         self.summary_content = self.summary_card.winfo_children()[-1]
 
-        self.trace_card = card(content, "Recorrido del AFN", "Estados activos durante la simulación")
+        self.trace_card = card(content, "Recorrido del AFN")
         self.trace_card.grid(row=3, column=1, sticky="nsew", padx=(6, 34), pady=(0, 12))
         self.trace_content = self.trace_card.winfo_children()[-1]
 
-        self.dfa_card = card(content, "AFD y AFD mínimo", "Resultados del módulo de determinización")
-        self.dfa_card.grid(row=4, column=0, columnspan=2, sticky="ew", padx=34, pady=(0, 30))
+        self.dfa_card = card(content, "Autómatas")
+        self.dfa_card.grid(row=3, column=0, columnspan=2, sticky="ew", padx=34, pady=(0, 12))
+        self.summary_card.grid_configure(row=4)
+        self.trace_card.grid_configure(row=4)
         self.dfa_content = self.dfa_card.winfo_children()[-1]
+        self.batch_card = card(content, "Archivo")
+        self.batch_card.grid(row=5, column=0, columnspan=2, sticky="ew", padx=34, pady=(0, 30))
+        batch_content = self.batch_card.winfo_children()[-1]
+        ttk.Label(batch_content, textvariable=self.batch_context_var, style="Muted.TLabel", wraplength=720).grid(row=0, column=0, sticky="w", pady=(0, 8))
+        self.batch_table = ttk.Treeview(batch_content, columns=("line", "regex", "nfa", "dfa", "min"), show="headings", height=6)
+        for name, title, width in (("line", "Línea", 50), ("regex", "Expresión / error", 340), ("nfa", "AFN", 70), ("dfa", "AFD", 70), ("min", "Mínimo", 70)):
+            self.batch_table.heading(name, text=title)
+            self.batch_table.column(name, width=width, stretch=name == "regex")
+        self.batch_table.grid(row=1, column=0, sticky="ew")
+        scrollbar = ttk.Scrollbar(batch_content, orient="vertical", command=self.batch_table.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        self.batch_table.configure(yscrollcommand=scrollbar.set)
+        self.batch_table.bind("<<TreeviewSelect>>", self._select_batch_result)
+        ttk.Label(batch_content, textvariable=self.file_var, style="Muted.TLabel").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.batch_card.grid_remove()
 
     def _build_input_card(self, parent) -> None:
-        input_card = card(parent, "Nueva evaluación", "Usa |, *, ( ) y concatenación implícita")
+        input_card = card(parent)
         input_card.grid(row=1, column=0, columnspan=2, sticky="ew", padx=34, pady=(0, 12))
         content = input_card.winfo_children()[-1]
         content.columnconfigure(0, weight=1)
         content.columnconfigure(1, weight=1)
 
         ttk.Label(content, text="Expresión regular", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(content, text="Cadena a evaluar", style="Muted.TLabel").grid(row=0, column=1, sticky="w", padx=(12, 0))
+        ttk.Label(content, text="Cadena", style="Muted.TLabel").grid(row=0, column=1, sticky="w", padx=(12, 0))
         ttk.Entry(content, textvariable=self.expression_var, style="App.TEntry").grid(row=1, column=0, sticky="ew", pady=(5, 14))
         ttk.Entry(content, textvariable=self.word_var, style="App.TEntry").grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=(5, 14))
 
         actions = ttk.Frame(content, style="Card.TFrame")
         actions.grid(row=2, column=0, columnspan=2, sticky="ew")
         actions.columnconfigure(2, weight=1)
-        ttk.Button(actions, text="Analizar cadena", style="Accent.TButton", command=self.analyze).grid(row=0, column=0, sticky="w")
+        ttk.Button(actions, text="Analizar", style="Accent.TButton", command=self.analyze).grid(row=0, column=0, sticky="w")
         ttk.Button(actions, text="Cargar archivo .txt", style="Secondary.TButton", command=self.load_file).grid(row=0, column=1, sticky="w", padx=(8, 0))
-        ttk.Label(actions, textvariable=self.file_var, style="Muted.TLabel").grid(row=0, column=2, sticky="e", padx=(12, 0))
+        ttk.Button(actions, text="Sintaxis", style="Secondary.TButton", command=self._show_syntax).grid(row=0, column=2, sticky="e")
 
-        self.expression_picker = ttk.Combobox(content, style="App.TCombobox", state="readonly")
-        self.expression_picker.bind("<<ComboboxSelected>>", self._select_loaded_expression)
+    def _show_syntax(self) -> None:
+        messagebox.showinfo(
+            "Sintaxis",
+            "a|b   Unión\na*   Cero o más repeticiones\nab o a.b   Concatenación\n( )   Agrupación\n"
+            "ε   Palabra vacía en la expresión\n\n"
+            "Para evaluar la cadena vacía, deja el campo Cadena vacío.\n"
+            "Cada símbolo es un carácter. No se admiten espacios en la expresión.\n"
+            "No se implementan atajos como +, ? o [a-z]; se leen como caracteres literales.",
+            parent=self.root,
+        )
 
     def _show_empty_result(self) -> None:
-        clear_children(self.status_content)
-        ttk.Label(self.status_content, text="Listo para empezar", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            self.status_content,
-            text="Ingresa una expresión y una cadena; el resultado aparecerá aquí.",
-            style="Muted.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
-        self._show_placeholder_details()
+        self.status_card.grid_remove()
+        self._hide_details()
 
-    def _show_placeholder_details(self) -> None:
-        clear_children(self.summary_content)
-        clear_children(self.trace_content)
-        clear_children(self.dfa_content)
-        ttk.Label(self.summary_content, text="Aún no hay una expresión analizada.", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(self.trace_content, text="Aquí se mostrarán los estados activos del AFN.", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(
-            self.dfa_content,
-            text="Las tarjetas del AFD aparecerán al integrar el módulo de tu compañero.",
-            style="Muted.TLabel",
-        ).grid(row=0, column=0, sticky="w")
+    def _hide_details(self) -> None:
+        for panel in (self.summary_card, self.trace_card, self.dfa_card):
+            panel.grid_remove()
 
     def _show_error(self, message: str) -> None:
         clear_children(self.status_content)
-        ttk.Label(self.status_content, text="Revisa la expresión", style="CardTitle.TLabel", foreground=theme.RED).grid(row=0, column=0, sticky="w")
-        ttk.Label(self.status_content, text=message, style="Muted.TLabel", wraplength=720).grid(row=1, column=0, sticky="w", pady=(4, 0))
-        self._show_placeholder_details()
+        self.status_card.grid()
+        ttk.Label(self.status_content, text=message, style="Body.TLabel", foreground=theme.RED, wraplength=720).grid(row=0, column=0, sticky="w")
+        self._hide_details()
 
     def analyze(self) -> None:
-        """Ejecuta la parte AFN y actualiza la vista sin cerrar la aplicación."""
+        """Ejecuta los tres autómatas y actualiza la vista."""
         expression = self.expression_var.get().strip()
         word = self.word_var.get()
         try:
             analysis = analyze_nfa(expression, word)
-        except ValueError as error:
+            dfas = analyze_optional_dfas(analysis.nfa, word)
+        except (ValueError, RuntimeError, OSError) as error:
             self._show_error(str(error))
             return
 
-        self._show_nfa_analysis(analysis)
+        self._show_nfa_analysis(analysis, dfas)
 
-    def _show_nfa_analysis(self, analysis: NFAAnalysis) -> None:
+    def _show_nfa_analysis(self, analysis: NFAAnalysis, dfas) -> None:
+        for panel in (self.status_card, self.summary_card, self.trace_card, self.dfa_card):
+            panel.grid()
         clear_children(self.status_content)
         accepted = analysis.accepts_word
         title = "Cadena aceptada" if accepted else "Cadena no aceptada"
-        explanation = (
-            "La cadena pertenece al lenguaje de la expresión regular."
-            if accepted
-            else "La cadena no pertenece al lenguaje de la expresión regular."
-        )
         color = theme.GREEN if accepted else theme.RED
         ttk.Label(self.status_content, text=title, style="CardTitle.TLabel", foreground=color).grid(row=0, column=0, sticky="w")
-        ttk.Label(self.status_content, text=explanation, style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         clear_children(self.summary_content)
         info_row(self.summary_content, 0, "Concatenación explícita", analysis.explicit_expression)
         info_row(self.summary_content, 1, "Postfix", analysis.postfix)
-        info_row(self.summary_content, 2, "Estados del AFN", str(analysis.state_count))
         alphabet = ", ".join(analysis.alphabet) if analysis.alphabet else "∅"
-        info_row(self.summary_content, 3, "Alfabeto", alphabet)
+        info_row(self.summary_content, 2, "Alfabeto", alphabet)
+        info_row(self.summary_content, 3, "Cadena evaluada", analysis.word if analysis.word else "ε (vacía)")
 
         clear_children(self.trace_content)
         for index, step in enumerate(analysis.trace):
@@ -150,37 +156,64 @@ class LexerApp:
             states = "{" + ", ".join(map(str, sorted(step.states))) + "}"
             info_row(self.trace_content, index, label, states)
 
-        self._show_dfa_results(analysis)
+        self._show_dfa_results(analysis, dfas)
 
-    def _show_dfa_results(self, analysis: NFAAnalysis) -> None:
+    def _show_dfa_results(self, analysis: NFAAnalysis, dfa_results) -> None:
         clear_children(self.dfa_content)
-        try:
-            dfa_results = analyze_optional_dfas(analysis.nfa, analysis.word)
-        except Exception as error:  # El aporte externo no debe cerrar la interfaz.
-            ttk.Label(self.dfa_content, text="El módulo AFD devolvió un error.", style="CardTitle.TLabel", foreground=theme.RED).grid(row=0, column=0, sticky="w")
-            ttk.Label(self.dfa_content, text=str(error), style="Muted.TLabel", wraplength=720).grid(row=1, column=0, sticky="w", pady=(4, 0))
-            return
 
         if not dfa_results:
             ttk.Label(
                 self.dfa_content,
-                text="El bloque AFN ya está listo. Esta sección se completará al integrar el AFD por subconjuntos y su minimización.",
+                text="No se encontraron resultados del AFD. Revisa la instalación.",
                 style="Muted.TLabel",
                 wraplength=720,
             ).grid(row=0, column=0, sticky="w")
             return
 
-        for row, result in enumerate(dfa_results):
-            verdict = "acepta" if result.accepts_word else "no acepta"
-            ttk.Label(self.dfa_content, text=result.title, style="CardTitle.TLabel").grid(row=row * 2, column=0, sticky="w", pady=(0 if row == 0 else 10, 0))
-            ttk.Label(
-                self.dfa_content,
-                text=f"{result.state_count} estados · {verdict} la cadena",
-                style="Muted.TLabel",
-            ).grid(row=row * 2 + 1, column=0, sticky="w", pady=(2, 0))
+        for column, heading in enumerate(("Autómata", "Estados", "Acepta", "")):
+            ttk.Label(self.dfa_content, text=heading, style="Muted.TLabel").grid(row=0, column=column, sticky="w", padx=(0, 24), pady=(0, 8))
+        first_image = dfa_results[0].image_path
+        rows = [("AFN", analysis.state_count, analysis.accepts_word,
+                 first_image.parent / "afn.png" if first_image else None)]
+        rows.extend((result.title, result.state_count, result.accepts_word, result.image_path) for result in dfa_results)
+        for row, (title, state_count, accepted, image_path) in enumerate(rows, 1):
+            ttk.Label(self.dfa_content, text=title, style="Body.TLabel").grid(row=row, column=0, sticky="w", padx=(0, 24), pady=6)
+            ttk.Label(self.dfa_content, text=str(state_count), style="Value.TLabel").grid(row=row, column=1, sticky="w", padx=(0, 24))
+            ttk.Label(self.dfa_content, text="Sí" if accepted else "No", style="Value.TLabel", foreground=theme.GREEN if accepted else theme.RED).grid(row=row, column=2, sticky="w", padx=(0, 24))
+            if image_path:
+                ttk.Button(self.dfa_content, text="Ver grafo", command=lambda p=image_path, t=title: self._show_graph(p, t)).grid(row=row, column=3, sticky="e")
+        if any(result.accepts_word != analysis.accepts_word for result in dfa_results):
+            ttk.Label(self.dfa_content, text="Los autómatas dieron resultados distintos.", style="Body.TLabel", foreground=theme.RED).grid(row=4, column=0, columnspan=4, sticky="w", pady=(8, 0))
+
+    def _show_graph(self, path: Path, title: str) -> None:
+        """Visor con desplazamiento horizontal y vertical, sin recortar el PNG."""
+        try:
+            picture = tk.PhotoImage(master=self.root, file=str(path))
+        except (tk.TclError, OSError) as error:
+            self._show_error(f"No fue posible abrir el grafo: {error}")
+            return
+        window = tk.Toplevel(self.root)
+        window.title(title)
+        window.geometry("1000x650")
+        canvas = tk.Canvas(window, background="white", highlightthickness=0)
+        horizontal = ttk.Scrollbar(window, orient="horizontal", command=canvas.xview)
+        vertical = ttk.Scrollbar(window, orient="vertical", command=canvas.yview)
+        canvas.configure(xscrollcommand=horizontal.set, yscrollcommand=vertical.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        horizontal.grid(row=1, column=0, sticky="ew")
+        vertical.grid(row=0, column=1, sticky="ns")
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(0, weight=1)
+        canvas.create_image(20, 20, image=picture, anchor="nw")
+        canvas.image = picture
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        window.bind("<Right>", lambda _event: canvas.xview_scroll(1, "pages"))
+        window.bind("<Left>", lambda _event: canvas.xview_scroll(-1, "pages"))
+        window.bind("<Next>", lambda _event: canvas.yview_scroll(1, "pages"))
+        window.bind("<Prior>", lambda _event: canvas.yview_scroll(-1, "pages"))
 
     def load_file(self) -> None:
-        """Carga expresiones no vacías desde un archivo, una por línea."""
+        """Procesa todo el archivo y permite inspeccionar cada resultado."""
         filename = filedialog.askopenfilename(
             title="Selecciona un archivo de expresiones",
             filetypes=[("Archivos de texto", "*.txt"), ("Todos los archivos", "*.*")],
@@ -188,30 +221,62 @@ class LexerApp:
         if not filename:
             return
 
+        if self._batch_job is not None:
+            self.root.after_cancel(self._batch_job)
+            self._batch_job = None
+        self._batch_results.clear()
+        self.batch_table.delete(*self.batch_table.get_children())
+        self._batch_word = self.word_var.get()
+        self.batch_card.grid()
+        displayed_word = repr(self._batch_word) if self._batch_word else "ε (vacía)"
+        self.batch_context_var.set(f"{Path(filename).name} · Cadena: {displayed_word}")
+        self._batch_iterator = iter_file_analyses(Path(filename), self._batch_word)
+        self.file_var.set("Procesando archivo…")
+        self._process_next_line()
+
+    def _process_next_line(self) -> None:
+        self._batch_job = None
         try:
-            expressions = [line.strip() for line in Path(filename).read_text(encoding="utf-8").splitlines() if line.strip()]
-        except OSError as error:
-            self._show_error(f"No fue posible leer el archivo: {error}")
+            result = next(self._batch_iterator)
+        except StopIteration:
+            errors = sum(result.error is not None for result in self._batch_results.values())
+            count = len(self._batch_results)
+            summary = f"{count} {'línea' if count == 1 else 'líneas'}"
+            if errors:
+                summary += f" · {errors} {'error' if errors == 1 else 'errores'}"
+            self.file_var.set(summary)
             return
-
-        if not expressions:
-            self._show_error("El archivo no contiene expresiones regulares.")
+        except (OSError, UnicodeError, ValueError) as error:
+            self.file_var.set("No se pudo procesar el archivo")
+            self._show_error(str(error))
             return
+        identifier = str(result.line_number)
+        self._batch_results[identifier] = result
+        if result.error:
+            values = (result.line_number, f"{result.expression} — {result.error}", "Error", "—", "—")
+        else:
+            verdicts = ["Sí" if accepted else "No" for accepted in (result.analysis.accepts_word, *(dfa.accepts_word for dfa in result.dfas))]
+            values = (result.line_number, result.expression, *verdicts)
+        self.batch_table.insert("", "end", iid=identifier, values=values)
+        if len(self._batch_results) == 1:
+            self.batch_table.selection_set(identifier)
+            self._select_batch_result()
+        self.file_var.set(f"{len(self._batch_results)} líneas procesadas…")
+        self._batch_job = self.root.after(1, self._process_next_line)
 
-        self._loaded_expressions = expressions
-        self.expression_picker["values"] = expressions
-        self.expression_picker.set(expressions[0])
-        self.expression_var.set(expressions[0])
-        self.file_var.set(f"{len(expressions)} expresión(es) cargada(s)")
-
-        if not self.expression_picker.winfo_ismapped():
-            self.expression_picker.master.grid_columnconfigure(0, weight=1)
-            self.expression_picker.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-
-    def _select_loaded_expression(self, _event=None) -> None:
-        selected = self.expression_picker.get()
-        if selected:
-            self.expression_var.set(selected)
+    def _select_batch_result(self, _event=None) -> None:
+        selected = self.batch_table.selection()
+        if not selected:
+            return
+        result = self._batch_results.get(selected[0])
+        if result is None:
+            return
+        self.expression_var.set(result.expression)
+        self.word_var.set(self._batch_word)
+        if result.error:
+            self._show_error(f"Línea {result.line_number}: {result.error}")
+        else:
+            self._show_nfa_analysis(result.analysis, result.dfas)
 
 
 def run() -> None:

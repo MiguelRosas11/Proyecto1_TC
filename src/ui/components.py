@@ -25,6 +25,8 @@ class ScrollableFrame(ttk.Frame):
         self.content.bind("<Configure>", self._update_scroll_region)
         self.canvas.bind("<Configure>", self._fit_content_width)
         self.canvas.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        self.winfo_toplevel().bind("<Next>", lambda _event: self.canvas.yview_scroll(1, "pages"), add="+")
+        self.winfo_toplevel().bind("<Prior>", lambda _event: self.canvas.yview_scroll(-1, "pages"), add="+")
 
     def _update_scroll_region(self, _event=None) -> None:
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -33,18 +35,24 @@ class ScrollableFrame(ttk.Frame):
         self.canvas.itemconfigure(self._content_window, width=event.width)
 
     def _on_mousewheel(self, event) -> None:
-        self.canvas.yview_scroll(int(-event.delta / 120), "units")
+        if event.widget.winfo_toplevel() != self.winfo_toplevel():
+            return
+        delta = event.delta
+        units = int(-delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1)
+        if delta:
+            self.canvas.yview_scroll(units, "units")
 
 
-def card(parent, title: str, subtitle: str | None = None) -> ttk.Frame:
+def card(parent, title: str | None = None, subtitle: str | None = None) -> ttk.Frame:
     """Crea una tarjeta blanca con título y devuelve su contenido interno."""
     outer = ttk.Frame(parent, style="Card.TFrame", padding=16)
-    ttk.Label(outer, text=title, style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+    if title:
+        ttk.Label(outer, text=title, style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
     if subtitle:
         ttk.Label(outer, text=subtitle, style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 0))
 
     content = ttk.Frame(outer, style="Card.TFrame")
-    content.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+    content.grid(row=2, column=0, sticky="ew", pady=(12 if title or subtitle else 0, 0))
     outer.columnconfigure(0, weight=1)
     content.columnconfigure(0, weight=1)
     return outer
